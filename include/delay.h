@@ -5,7 +5,6 @@
 #include "stm32f0xx_conf.h"
 
 void TimingDelay_Decrement(void);
-void Delay_us(uint32_t nTime);
 void Delay_ms(uint16_t);
 void DelayInit(void);
 
