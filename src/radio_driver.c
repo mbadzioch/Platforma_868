@@ -133,7 +133,7 @@ void RD_Init(void)
 
   GpioInit();
   SpiInit();
-  RadioInterruptInit();
+ // RadioInterruptInit(); TODO: ENABLE THIS
   RD_RadioConfig();
 
   IsRadioDriverInitialized = true;
@@ -143,14 +143,18 @@ void RD_RadioSendWriteTransaction(uint8_t address, uint8_t data)
 {
   RadioSelectActive();
   SpiSendData(RD_ADRESS_AS_WRITE(address));
+  SpiReceiveData();
   SpiSendData(data);
+  SpiReceiveData();
   RadioSelectInactive();
 }
 
 uint8_t RD_RadioSendReadTransaction(uint8_t address)
 {
+
   RadioSelectActive();
   SpiSendData(RD_ADRESS_AS_READ(address));
+  SpiReceiveData();
   SpiSendData(0xFF);
   RadioSelectInactive();
 
@@ -161,9 +165,11 @@ void RD_RadioSendWriteBurst(uint8_t address, uint8_t *dataIn, uint16_t size)
 {
   RadioSelectActive();
   SpiSendData(RD_ADRESS_AS_WRITE(address));
+  SpiReceiveData();
   for (uint16_t i = 0; i < size; i++)
   {
     SpiSendData(*(dataIn++));
+    SpiReceiveData();
   }
   RadioSelectInactive();
 }
@@ -172,6 +178,7 @@ void RD_RadioSendReadBurst(uint8_t address, uint8_t *dataOut, uint16_t size)
 {
   RadioSelectActive();
   SpiSendData(RD_ADRESS_AS_READ(address));
+  SpiReceiveData();
   for (uint16_t i = 0; i < size; i++)
   {
     SpiSendData(0xFF);
@@ -464,7 +471,6 @@ void RD_RadioConfig(void)
   RD_RadioSendWriteTransaction(HEADER_CTRL2_33_REG, 0x42); // Header 3, 2, 1, 0, Sync 3 & 2, packet length included in header = 0x22
   RD_RadioSendWriteTransaction(PREAMBLE_LEN_34_REG, 0x0A); // TODO: why 10? should be 16?
   RD_RadioSendWriteTransaction(PREAMBLE_DETECTION_CNTRL_35_REG, 0x22);    // 16 bits = 0x22
-  //TODO: clear this
   RD_RadioSendWriteTransaction(SYNC_WORD3_36_REG, GET_MSB(RADIO_SYNC_WORD)); // Set arbitrarily
   RD_RadioSendWriteTransaction(SYNC_WORD2_37_REG, GET_LSB(RADIO_SYNC_WORD)); // Set arbitrarily
   RD_RadioSendWriteTransaction(SYNC_WORD1_38_REG, 0x00); // Set arbitrarily
@@ -531,21 +537,21 @@ static void GpioInit(void)
   GPIO_InitTypeDef GPIO_InitStruct;
 
 
-  RCC_AHBPeriphClockCmd(GPIOA, ENABLE);
-  RCC_AHBPeriphClockCmd(GPIOB, ENABLE);
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOB, ENABLE);
 
   /* Initialize SPI pins */
   GPIO_StructInit(&GPIO_InitStruct);
   GPIO_InitStruct.GPIO_Mode                   = GPIO_Mode_AF;
   GPIO_InitStruct.GPIO_OType                  = GPIO_OType_PP;
   GPIO_InitStruct.GPIO_Pin                    = GPIO_Pin_13|GPIO_Pin_14|GPIO_Pin_15;
-  GPIO_InitStruct.GPIO_PuPd                   = GPIO_PuPd_NOPULL;
+  GPIO_InitStruct.GPIO_PuPd                   = GPIO_PuPd_UP;
   GPIO_InitStruct.GPIO_Speed                  = GPIO_Speed_50MHz;
   GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  GPIO_PinAFConfig(GPIOB, GPIO_Pin_13, GPIO_AF_0);
-  GPIO_PinAFConfig(GPIOB, GPIO_Pin_14, GPIO_AF_0);
-  GPIO_PinAFConfig(GPIOB, GPIO_Pin_15, GPIO_AF_0);
+  GPIO_PinAFConfig(GPIOB, GPIO_PinSource13, GPIO_AF_0);
+  GPIO_PinAFConfig(GPIOB, GPIO_PinSource14, GPIO_AF_0);
+  GPIO_PinAFConfig(GPIOB, GPIO_PinSource15, GPIO_AF_0);
 
   /* Initialize SPI SS pin */
   GPIO_StructInit(&GPIO_InitStruct);
@@ -591,7 +597,7 @@ static void SpiInit(void)
   SPI_InitStruct.SPI_CPOL = SPI_CPOL_Low;
   SPI_InitStruct.SPI_CPHA = SPI_CPHA_1Edge;
   SPI_InitStruct.SPI_NSS = SPI_NSS_Soft;
-  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_16; // Configure SPI on 42 / 16 = 2,625 MHz
+  SPI_InitStruct.SPI_BaudRatePrescaler = SPI_BaudRatePrescaler_4; // Configure SPI on 42 / 16 = 2,625 MHz
   SPI_InitStruct.SPI_FirstBit = SPI_FirstBit_MSB;
 
   RCC_APB1PeriphClockCmd(RCC_APB1Periph_SPI2, ENABLE);
@@ -625,27 +631,34 @@ static void RadioInterruptInit(void)
 
 static inline void RadioSelectActive(void)
 {
-	GPIO_ResetBits(GPIOA, GPIO_Pin_9);
+	GPIO_ResetBits(GPIOB, GPIO_Pin_12);
 }
 
 static inline void RadioSelectInactive(void)
 {
-	GPIO_SetBits(GPIOA, GPIO_Pin_9);
+	GPIO_SetBits(GPIOB, GPIO_Pin_12);
 }
 
 static inline void SpiSendData(uint8_t data)
 {
 
-  SPI2->DR = data;
+	SPI_SendData8(SPI2,data);
+    /* Waiting until TX FIFO is empty */
+    while (SPI_GetTransmissionFIFOStatus(SPI2) != SPI_TransmissionFIFOStatus_Empty);
+    /* Wait busy flag */
+    while(SPI_I2S_GetFlagStatus(SPI2, SPI_I2S_FLAG_BSY) == SET);
+
+ /* SPI2->DR = data;
   while( !(SPI2->SR & SPI_I2S_FLAG_TXE) );
   while( !(SPI2->SR & SPI_I2S_FLAG_RXNE) );
   while( SPI2->SR & SPI_I2S_FLAG_BSY );
-  data = SPI2->DR;
+  data = SPI2->DR;*/
 }
 
 inline uint8_t SpiReceiveData(void)
 {
-  return SPI2->DR;
+	return SPI_ReceiveData8(SPI2);
+ // return SPI2->DR;
 }
 
 static inline void RadioClearFifos(void)
